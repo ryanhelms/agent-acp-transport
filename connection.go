@@ -57,9 +57,18 @@ type handlingNotificationKey struct{}
 type handlingRequest struct {
 	conn    *Connection
 	arrival uint64
+	validID bool
 }
 
 type handlingRequestKey struct{}
+
+// IsInboundRequest reports whether ctx belongs to an incoming request
+// with a valid, non-null JSON-RPC ID. Notification handlers never pass
+// this check, even when their method normally handles requests.
+func IsInboundRequest(ctx context.Context) bool {
+	request, ok := ctx.Value(handlingRequestKey{}).(handlingRequest)
+	return ok && request.validID
+}
 
 // notificationSeq returns the sequence number of the notification from c
 // whose handler runs with ctx.
@@ -106,6 +115,7 @@ type Connection struct {
 	inboundMethods         map[string]struct{}
 	selectInbound          func(method, sessionID string) bool
 	omitPlainNotifications bool
+	afterRequestWrite      func(string)
 	w                      io.Writer
 	r                      io.Reader
 	handler                MethodHandler
@@ -168,6 +178,7 @@ func NewConnectionWithOptions(handler MethodHandler, peerInput io.Writer, peerOu
 		w:                         peerInput,
 		r:                         peerOutput,
 		handler:                   handler,
+		afterRequestWrite:         opts.AfterRequestWrite,
 		pending:                   make(map[string]*pendingResponse),
 		inflight:                  make(map[string]context.CancelCauseFunc),
 		inflightArrivals:          make(map[uint64]struct{}),
@@ -453,7 +464,7 @@ func formatCanonicalJSONRPCNumericID(negative bool, digits string, exp10 int) (s
 
 func (c *Connection) receive() {
 	const (
-		initialBufSize = 1024 * 1024
+		initialBufSize = 64 << 10
 		maxBufSize     = 10 * 1024 * 1024
 	)
 
@@ -513,7 +524,9 @@ func (c *Connection) receive() {
 				reqCtx, cancel := context.WithCancelCause(c.ctx)
 				c.inboundMessages++
 				arrival := c.inboundMessages
-				reqCtx = context.WithValue(reqCtx, handlingRequestKey{}, handlingRequest{conn: c, arrival: arrival})
+				reqCtx = context.WithValue(reqCtx, handlingRequestKey{}, handlingRequest{
+					conn: c, arrival: arrival, validID: err == nil && msg.JSONRPC == "2.0" && !bytes.Equal(msg.ID, []byte("null")),
+				})
 
 				c.mu.Lock()
 				c.inflight[idKey] = cancel
@@ -838,6 +851,9 @@ func sendRequest[T any](c *Connection, ctx context.Context, method string, param
 		return result, nil, NewInternalError(map[string]any{"error": err.Error()})
 	}
 
+	if c.afterRequestWrite != nil {
+		c.afterRequestWrite(method)
+	}
 	donePeerWait := c.startPeerWait(ctx)
 	resp, err := c.waitForResponse(ctx, pr, idKey)
 	donePeerWait()

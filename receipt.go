@@ -27,6 +27,10 @@ type Options struct {
 	// queueing notifications. Use only for bounded passive handlers. A handler
 	// must not perform writes, issue RPCs, or wait for work that needs the reader.
 	HandleNotificationsInline bool
+	// AfterRequestWrite runs after all bytes of an outgoing request have been
+	// accepted by the stream writer. It receives the method without decoding
+	// the encoded envelope. The callback must return promptly.
+	AfterRequestWrite func(method string)
 }
 
 // Receipt contains owned JSON from a single accepted peer frame. Envelope keeps
