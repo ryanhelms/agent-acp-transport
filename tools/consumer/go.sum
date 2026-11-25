@@ -1,0 +1,4 @@
+agent-acp.local/transport v0.1.0 h1:QJC15McjD4XFpn2XLHxcGIEy4LtMz82AE/ieudeTSSc=
+agent-acp.local/transport v0.1.0/go.mod h1:qNH+kfNtz1EVorZw5y/3RA19qZhGvHM8v8G1c9v+ilk=
+github.com/coder/acp-go-sdk v0.20.0 h1:nrDOWYLy7a32ZNi6OYqw1oDhr5j34pfKPXmGoxYlvBc=
+github.com/coder/acp-go-sdk v0.20.0/go.mod h1:yKzM/3R9uELp4+nBAwwtkS0aN1FOFjo11CNPy37yFko=

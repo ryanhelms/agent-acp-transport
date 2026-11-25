@@ -1,0 +1,13 @@
+{
+  "name": "agent-acp-transport",
+  "goModule": "agent-acp.local/transport",
+  "version": "0.1.0",
+  "releaseTime": "2026-11-23T10:20:36Z",
+  "sourceSnapshotSHA256": "4b97520d38a4b2cef9d3637fa7e6d2e609115970dd4bfb5d9a75519f33cae7e4",
+  "sha256": {
+    "go/agent-acp.local/transport/@v/list": "d0b4f9120ba026c00fa23cb84b4e1620a2e6436592e58155a5151653179572c0",
+    "go/agent-acp.local/transport/@v/v0.1.0.info": "68ebaaa43408f9bca396efa439cf635ef3c5fb4ad84ee96fade09a9b74d5bc1e",
+    "go/agent-acp.local/transport/@v/v0.1.0.mod": "72ab9020ce4882d1ff74254f4a216da3527a89cca9c4d74cbff2c7ee841bdf17",
+    "go/agent-acp.local/transport/@v/v0.1.0.zip": "db67d42a49c00e5a0f6f429714a4f3ffbc01f043fe9fb316ff50a5e4622a7724"
+  }
+}
