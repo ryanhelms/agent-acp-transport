@@ -23,6 +23,10 @@ type Options struct {
 	// OmitPlainNotifications skips receipts for notifications with just jsonrpc:"2.0",
 	// method and params. Requests and extended notifications remain eligible.
 	OmitPlainNotifications bool
+	// HandleNotificationsInline uses the reader's own backpressure instead of
+	// queueing notifications. Use only for bounded passive handlers. A handler
+	// must not perform writes, issue RPCs, or wait for work that needs the reader.
+	HandleNotificationsInline bool
 }
 
 // Receipt contains owned JSON from a single accepted peer frame. Envelope keeps
