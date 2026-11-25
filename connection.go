@@ -57,9 +57,18 @@ type handlingNotificationKey struct{}
 type handlingRequest struct {
 	conn    *Connection
 	arrival uint64
+	validID bool
 }
 
 type handlingRequestKey struct{}
+
+// IsInboundRequest reports whether ctx belongs to an incoming request
+// with a valid, non-null JSON-RPC ID. Notification handlers never pass
+// this check, even when their method normally handles requests.
+func IsInboundRequest(ctx context.Context) bool {
+	request, ok := ctx.Value(handlingRequestKey{}).(handlingRequest)
+	return ok && request.validID
+}
 
 // notificationSeq returns the sequence number of the notification from c
 // whose handler runs with ctx.
@@ -513,7 +522,9 @@ func (c *Connection) receive() {
 				reqCtx, cancel := context.WithCancelCause(c.ctx)
 				c.inboundMessages++
 				arrival := c.inboundMessages
-				reqCtx = context.WithValue(reqCtx, handlingRequestKey{}, handlingRequest{conn: c, arrival: arrival})
+				reqCtx = context.WithValue(reqCtx, handlingRequestKey{}, handlingRequest{
+					conn: c, arrival: arrival, validID: err == nil && msg.JSONRPC == "2.0" && !bytes.Equal(msg.ID, []byte("null")),
+				})
 
 				c.mu.Lock()
 				c.inflight[idKey] = cancel
