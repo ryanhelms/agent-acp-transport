@@ -151,7 +151,8 @@ type Connection struct {
 
 	// notificationQueue serializes notification processing to maintain order.
 	// It is bounded to keep memory usage predictable.
-	notificationQueue chan queuedNotification
+	notificationQueue         chan queuedNotification
+	handleNotificationsInline bool
 }
 
 func NewConnection(handler MethodHandler, peerInput io.Writer, peerOutput io.Reader) *Connection {
@@ -164,20 +165,25 @@ func NewConnectionWithOptions(handler MethodHandler, peerInput io.Writer, peerOu
 	ctx, cancel := context.WithCancelCause(context.Background())
 	inboundCtx, inboundCancel := context.WithCancelCause(context.Background())
 	c := &Connection{
-		w:                   peerInput,
-		r:                   peerOutput,
-		handler:             handler,
-		pending:             make(map[string]*pendingResponse),
-		inflight:            make(map[string]context.CancelCauseFunc),
-		inflightArrivals:    make(map[uint64]struct{}),
-		peerWaits:           make(map[uint64]int),
-		cancelRequestSignal: make(chan struct{}, 1),
-		ctx:                 ctx,
-		cancel:              cancel,
-		inboundCtx:          inboundCtx,
-		inboundCancel:       inboundCancel,
-		notificationQueue:   make(chan queuedNotification, defaultMaxQueuedNotifications),
+		w:                         peerInput,
+		r:                         peerOutput,
+		handler:                   handler,
+		pending:                   make(map[string]*pendingResponse),
+		inflight:                  make(map[string]context.CancelCauseFunc),
+		inflightArrivals:          make(map[uint64]struct{}),
+		peerWaits:                 make(map[uint64]int),
+		cancelRequestSignal:       make(chan struct{}, 1),
+		ctx:                       ctx,
+		cancel:                    cancel,
+		inboundCtx:                inboundCtx,
+		inboundCancel:             inboundCancel,
+		handleNotificationsInline: opts.HandleNotificationsInline,
 	}
+	queueSize := defaultMaxQueuedNotifications
+	if c.handleNotificationsInline {
+		queueSize = 0
+	}
+	c.notificationQueue = make(chan queuedNotification, queueSize)
 	if opts.SelectInbound != nil && len(opts.InboundMethods) > 0 {
 		c.inboundMethods = make(map[string]struct{}, len(opts.InboundMethods))
 		for _, m := range opts.InboundMethods {
@@ -196,7 +202,9 @@ func NewConnectionWithOptions(handler MethodHandler, peerInput io.Writer, peerOu
 	}()
 	go c.sendCancelRequests()
 	go c.receive()
-	go c.processNotifications()
+	if !c.handleNotificationsInline {
+		go c.processNotifications()
+	}
 	return c
 }
 
@@ -548,8 +556,14 @@ func (c *Connection) receive() {
 			c.notifyMu.Lock()
 			c.lastEnqueuedNotificationSeq++
 			seq := c.lastEnqueuedNotificationSeq
+			queued := queuedNotification{seq: seq, arrival: c.inboundMessages, msg: &m}
+			if c.handleNotificationsInline {
+				c.notifyMu.Unlock()
+				c.processNotification(queued)
+				continue
+			}
 			select {
-			case c.notificationQueue <- queuedNotification{seq: seq, arrival: c.inboundMessages, msg: &m}:
+			case c.notificationQueue <- queued:
 				c.notifyMu.Unlock()
 			default:
 				if c.lastEnqueuedNotificationSeq != seq {
@@ -614,23 +628,27 @@ func (c *Connection) shutdownReceive(cause error) {
 // It terminates when notificationQueue is closed (e.g. on disconnect in receive()).
 func (c *Connection) processNotifications() {
 	for queued := range c.notificationQueue {
-		handlerCtx := context.WithValue(c.inboundCtx, handlingNotificationKey{}, handlingNotification{conn: c, seq: queued.seq, arrival: queued.arrival})
-		c.handleInbound(handlerCtx, queued.msg)
-
-		c.notifyMu.Lock()
-		expectedSeq := c.completedNotificationSeq + 1
-		if queued.seq != expectedSeq {
-			c.notifyMu.Unlock()
-			panic("notification sequence completed out of order")
-		}
-		c.completedNotificationSeq = queued.seq
-		if c.completedNotificationSeq > c.lastEnqueuedNotificationSeq {
-			c.notifyMu.Unlock()
-			panic("completed notification sequence exceeded enqueued notification sequence")
-		}
-		c.notifyCond.Broadcast()
-		c.notifyMu.Unlock()
+		c.processNotification(queued)
 	}
+}
+
+func (c *Connection) processNotification(queued queuedNotification) {
+	handlerCtx := context.WithValue(c.inboundCtx, handlingNotificationKey{}, handlingNotification{conn: c, seq: queued.seq, arrival: queued.arrival})
+	c.handleInbound(handlerCtx, queued.msg)
+
+	c.notifyMu.Lock()
+	expectedSeq := c.completedNotificationSeq + 1
+	if queued.seq != expectedSeq {
+		c.notifyMu.Unlock()
+		panic("notification sequence completed out of order")
+	}
+	c.completedNotificationSeq = queued.seq
+	if c.completedNotificationSeq > c.lastEnqueuedNotificationSeq {
+		c.notifyMu.Unlock()
+		panic("completed notification sequence exceeded enqueued notification sequence")
+	}
+	c.notifyCond.Broadcast()
+	c.notifyMu.Unlock()
 }
 
 func (c *Connection) handleResponse(msg *anyMessage, line []byte) {
