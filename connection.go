@@ -115,6 +115,7 @@ type Connection struct {
 	inboundMethods         map[string]struct{}
 	selectInbound          func(method, sessionID string) bool
 	omitPlainNotifications bool
+	afterRequestWrite      func(string)
 	w                      io.Writer
 	r                      io.Reader
 	handler                MethodHandler
@@ -177,6 +178,7 @@ func NewConnectionWithOptions(handler MethodHandler, peerInput io.Writer, peerOu
 		w:                         peerInput,
 		r:                         peerOutput,
 		handler:                   handler,
+		afterRequestWrite:         opts.AfterRequestWrite,
 		pending:                   make(map[string]*pendingResponse),
 		inflight:                  make(map[string]context.CancelCauseFunc),
 		inflightArrivals:          make(map[uint64]struct{}),
@@ -462,7 +464,7 @@ func formatCanonicalJSONRPCNumericID(negative bool, digits string, exp10 int) (s
 
 func (c *Connection) receive() {
 	const (
-		initialBufSize = 1024 * 1024
+		initialBufSize = 64 << 10
 		maxBufSize     = 10 * 1024 * 1024
 	)
 
@@ -849,6 +851,9 @@ func sendRequest[T any](c *Connection, ctx context.Context, method string, param
 		return result, nil, NewInternalError(map[string]any{"error": err.Error()})
 	}
 
+	if c.afterRequestWrite != nil {
+		c.afterRequestWrite(method)
+	}
 	donePeerWait := c.startPeerWait(ctx)
 	resp, err := c.waitForResponse(ctx, pr, idKey)
 	donePeerWait()
